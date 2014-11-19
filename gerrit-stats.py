@@ -38,6 +38,7 @@ class AuthorChangeActivity(object):
           Created:   Changes created
           Merged:    Changes merged
           Abandoned: Changes abandoned
+          Both:      Changes both created and merged/abandoned during the period
         Number of changes not owned by the given author:
           Commented: Changes commented by the given author
           Voted:     Changes on which the given author has voted
@@ -49,7 +50,8 @@ class AuthorChangeActivity(object):
         stats.process_records(records.change_activity, [
             StatisticsCountColumn('Created', lambda x : x.created_on),
             StatisticsCountColumn('Merged', lambda x : x.merged_on),
-            StatisticsCountColumn('Abandoned', lambda x : x.abandoned_on)
+            StatisticsCountColumn('Abandoned', lambda x : x.abandoned_on),
+            StatisticsCountColumn('Both', lambda x : x.created_on and x.closed_on)
             ])
         stats.process_records(records.comments, [
             StatisticsDistinctCountColumn('Commented', lambda x : x.change if x.timestamp else None)

@@ -15,6 +15,12 @@ class ChangeRecord(object):
         self.created_on = created_on
         self.merged_on = merged_on
         self.abandoned_on = abandoned_on
+        if self.merged_on:
+            self.closed_on = self.merged_on
+        elif self.abandoned_on:
+            self.closed_on = self.abandoned_on
+        else:
+            self.closed_on = None
 
     @property
     def author(self):
@@ -163,6 +169,8 @@ class GerritRecords(object):
         for change in changes:
             for patchset in change.patchsets:
                 for approval in patchset.get_approvals(gerrit.query.Approval.Type.code_review):
+                    if approval.by.technical_account:
+                        continue
                     timestamp = self._to_record_date(approval.granted_on)
                     record = VoteRecord(change, approval.by, timestamp)
                     result.append(record)
