@@ -2,9 +2,26 @@
 #
 # Copyright (c) 2014, Teemu Murtola
 
-"""Computes statistics from Gerrit changes"""
+"""Computes statistics from activity on Gerrit changes
+
+To use the script, you need a to have an SSH key configured on the Gerrit
+server.  To get started, run the script with
+    gerrit-activity.py --all --legend
+to see the types of statistics it can produce, and then with
+    gerrit-activity.py --help
+to see how to control the output.
+
+If you want to run the script multiple times over the same data (e.g., for
+development), you can use --cache to specify a local file in which the query
+results are stored.  If the file does not exist, it is automatically created.
+On subsequent runs, its contents are used instead of querying Gerrit again.
+This makes it substantially faster for cases where more recent data is not
+required.
+To update an existing cache file, add --update-cache to the command line.
+"""
 
 import subprocess
+import textwrap
 
 import gerrit.query
 import gerrit.records
@@ -14,6 +31,18 @@ from statistics import Statistics, StatisticsAuthorNameColumn, \
 class AuthorChangeActivity(object):
 
     title = "Number of changes during past N days"
+
+    def print_legend(self, fp):
+        text = """\
+        Number of changes owned by the given author:
+          Created:   Changes created
+          Merged:    Changes merged
+          Abandoned: Changes abandoned
+        Number of changes not owned by the given author:
+          Commented: Changes commented by the given author
+          Voted:     Changes on which the given author has voted
+        """
+        fp.write(textwrap.dedent(text))
 
     def do_stats(self, fp, records):
         stats = Statistics([StatisticsAuthorNameColumn('Name', lambda x : x.author)])
@@ -33,7 +62,20 @@ class AuthorChangeActivity(object):
 
 class AuthorOpenChanges(object):
 
-    title = "Number of open changes"
+    title = "Number of open changes by owner and status"
+
+    def print_legend(self, fp):
+        text = """\
+        Open:      Total number of changes (sum of other columns)
+        RFC/WIP:   Changes with RFC/WIP tag in the title
+        -Verified: Changes with a negative verified vote
+        -Review:   Changes with a negative review vote(s)
+        Approved:  Changes that have necessary votes for merging
+        +Review:   Changes with positive review vote(s), but no negatives or approvals
+        Comments:  Changes with comments by non-owner, but no votes on last patch set
+        Nothing:   No activity except for the owner
+        """
+        fp.write(textwrap.dedent(text))
 
     def do_stats(self, fp, records):
         stats = Statistics([StatisticsAuthorNameColumn('Name', lambda x : x.author)])
@@ -60,6 +102,13 @@ class AuthorOpenChangeActivity(object):
 
     title = "Activity on open changes"
 
+    def print_legend(self, fp):
+        text = """\
+        Commented: Open non-owned changes with comments by the given author
+        Voted:     Open non-owned changes with votes by the given author
+        """
+        fp.write(textwrap.dedent(text))
+
     def do_stats(self, fp, records):
         stats = Statistics([StatisticsAuthorNameColumn('Name', lambda x : x.author)])
         stats.process_records(records.open_comments, [
@@ -73,7 +122,16 @@ class AuthorOpenChangeActivity(object):
 
 class AuthorActivity(object):
 
-    title = "Activity (number of actions) during past N days"
+    title = "Activity during past N days"
+
+    def print_legend(self, fp):
+        text = """\
+        Activity in changes not owned by the given author:
+          Comments:  Number of comments
+          Technical: Number of technical comments (rebases, submissions etc.)
+          Votes:     Number of code review votes
+        """
+        fp.write(textwrap.dedent(text))
 
     def do_stats(self, fp, records):
         stats = Statistics([StatisticsAuthorNameColumn('Name', lambda x : x.author)])
@@ -95,27 +153,32 @@ def main():
     import os.path
     import sys
 
-    parser = argparse.ArgumentParser(description='Compute Gerrit statistics')
+    parser = argparse.ArgumentParser(description="""\
+            Computes statistics from Gerrit activity
+            """)
     parser.add_argument('--cache',
                         help='Cache file to use')
     parser.add_argument('--update-cache', action='store_true',
                         help='Update the contents of the cache file')
     parser.add_argument('--days', type=int, default=30,
                         help='Number of past days to count activity over')
-    parser.add_argument('--all', dest='all_stats', action='store_true',
-                        help='Print all types of statistics')
-    parser.add_argument('--open-by-author', dest='stats', action='append_const',
-                        const=AuthorOpenChanges,
-                        help='Print statistics on number of open changes by author')
-    parser.add_argument('--open-activity', dest='stats', action='append_const',
-                        const=AuthorOpenChangeActivity,
-                        help='Print statistics on activity on open changes by author')
-    parser.add_argument('--change-activity', dest='stats', action='append_const',
-                        const=AuthorChangeActivity,
-                        help='Print statistics on activity on changes by author')
-    parser.add_argument('--activity', dest='stats', action='append_const',
-                        const=AuthorActivity,
-                        help='Print statistics on recent activity by author')
+    parser.add_argument('--legend', action='store_true',
+                        help='Print explanation of columns for each statistics table')
+    group = parser.add_argument_group(title='Type of statistics')
+    group.add_argument('--all', dest='all_stats', action='store_true',
+                       help='Print all types of statistics')
+    group.add_argument('--open-by-author', dest='stats', action='append_const',
+                       const=AuthorOpenChanges,
+                       help='Print statistics on number of open changes by author')
+    group.add_argument('--open-activity', dest='stats', action='append_const',
+                       const=AuthorOpenChangeActivity,
+                       help='Print statistics on activity on open changes by author')
+    group.add_argument('--change-activity', dest='stats', action='append_const',
+                       const=AuthorChangeActivity,
+                       help='Print statistics on activity on changes by author')
+    group.add_argument('--activity', dest='stats', action='append_const',
+                       const=AuthorActivity,
+                       help='Print statistics on recent activity by author')
     args = parser.parse_args()
 
     stats = args.stats
@@ -143,7 +206,11 @@ def main():
         if not first:
             sys.stdout.write('\n\n')
         stat = stat_type()
-        sys.stdout.write(stat.title + '\n\n')
+        sys.stdout.write(stat.title + '\n')
+        sys.stdout.write('{:=^{width}}\n\n'.format('', width=len(stat.title)))
+        if args.legend:
+            stat.print_legend(sys.stdout)
+            sys.stdout.write('\n')
         stat.do_stats(sys.stdout, records)
         first = False
 
