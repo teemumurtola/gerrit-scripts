@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-# Copyright (c) 2014, Teemu Murtola
+# Copyright (c) 2014,2016, Teemu Murtola
 
 """Computes statistics from activity on Gerrit changes
 
@@ -20,7 +20,7 @@ required.
 To update an existing cache file, add --update-cache to the command line.
 """
 
-import subprocess
+import datetime
 import textwrap
 
 import gerrit.query
@@ -30,7 +30,7 @@ from statistics import Statistics, StatisticsAuthorNameColumn, \
 
 class AuthorChangeActivity(object):
 
-    title = "Number of changes during past N days"
+    title = "Number of changes during date range"
 
     def print_legend(self, fp):
         text = """\
@@ -124,7 +124,7 @@ class AuthorOpenChangeActivity(object):
 
 class AuthorActivity(object):
 
-    title = "Activity during past N days"
+    title = "Activity during date range"
 
     def print_legend(self, fp):
         text = """\
@@ -148,6 +148,18 @@ class AuthorActivity(object):
             ])
         stats.print_stats(fp, sort_by='Comments')
 
+
+def get_date_range(args):
+    today = datetime.date.today()
+    if args.year:
+        end_date = datetime.date(args.year, 12, 31)
+        start_date = datetime.date(args.year, 1, 1)
+    else:
+        end_date = today.replace(day=1) - datetime.timedelta(days=1)
+        start_date = end_date.replace(day=1)
+    max_age = (today - start_date).days + 1
+    return start_date, end_date, max_age
+
 def main():
     """Main function for the script"""
 
@@ -162,8 +174,12 @@ def main():
                         help='Cache file to use')
     parser.add_argument('--update-cache', action='store_true',
                         help='Update the contents of the cache file')
-    parser.add_argument('--days', type=int, default=30,
-                        help='Number of past days to count activity over')
+    parser.add_argument('--prev-month', action='store_true',
+                        help='Show statistics for previous month (default)')
+    parser.add_argument('--year', type=int,
+                        help='Show statistics for given year')
+    parser.add_argument('--query-batch', type=int, default=50,
+                        help='Batch size for gerrit query')
     parser.add_argument('--legend', action='store_true',
                         help='Print explanation of columns for each statistics table')
     group = parser.add_argument_group(title='Type of statistics')
@@ -188,20 +204,12 @@ def main():
         stats = [AuthorOpenChanges, AuthorOpenChangeActivity,
                 AuthorChangeActivity, AuthorActivity]
 
-    if not args.cache or args.update_cache or not os.path.exists(args.cache):
-        query = ['ssh', '-p', '29418', 'gerrit.gromacs.org', 'gerrit', 'query',
-                '--format=JSON', '--all-approvals', '--comments', '--',
-                '-age:{0}d'.format(args.days), 'OR', 'status:open']
-        query_results = subprocess.check_output(query)
-        if args.update_cache:
-            with open(args.cache, 'w') as fp:
-                fp.write(query_results)
-    elif args.cache:
-        with open(args.cache, 'r') as fp:
-            query_results = fp.read()
+    start_date, end_date, max_age = get_date_range(args)
+    sys.stdout.write('Date range: {0} - {1}\n'.format(start_date, end_date))
 
-    data = gerrit.query.GerritQueryResults(query_results)
-    records = gerrit.records.GerritRecords(data, 30)
+    cache = gerrit.query.GerritQueryCache(args.cache, max_age, args.query_batch)
+    data = cache.get_query_results(args.update_cache)
+    records = gerrit.records.GerritRecords(data, start_date, end_date)
 
     first = True
     for stat_type in stats:

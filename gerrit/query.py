@@ -1,10 +1,12 @@
-# Copyright (c) 2014, Teemu Murtola
+# Copyright (c) 2014,2016, Teemu Murtola
 
 """Classes to parse, store, and interpret `gerrit query` results."""
 
 import datetime
 import json
+import os.path
 import re
+import subprocess
 
 def _convert_time(timestamp):
     """Convert Gerrit timestamps to Python objects."""
@@ -188,7 +190,7 @@ class GerritQueryResults(object):
     def __init__(self, query_results):
         self._authors = dict()
         self._changes = list()
-        for line in query_results.splitlines():
+        for line in query_results:
             entry = json.loads(line)
             entry_type = entry.get('type')
             if entry_type and entry_type == 'stats':
@@ -197,6 +199,11 @@ class GerritQueryResults(object):
             self._add_change(entry)
         self._public_changes = filter(lambda x: not x.is_draft, self._changes)
         self._open_changes = filter(lambda x: x.is_open, self._public_changes)
+
+    @staticmethod
+    def has_more_results(query_results):
+        stats = json.loads(query_results.splitlines()[-1])
+        return stats['moreChanges']
 
     @property
     def public_changes(self):
@@ -215,17 +222,65 @@ class GerritQueryResults(object):
     def _resolve_author(self, author_json):
         """Add/resolve an author from a decoded JSON entry."""
         if not author_json:
-            return None
-        username = author_json.get('username')
+            username = '<unknown>'
+        else:
+            username = author_json.get('username')
         if not username:
             # If username is not specified, hopefully the e-mail is unique.
             # This gets triggered for some duplicate users, as well as for the
             # internal Gerrit user.
             # TODO: Consider merging duplicate users, if they can be recognized.
             username = author_json.get('email')
+            if not username:
+                username = author_json.get('name')
             assert username
         author = self._authors.get(username)
         if not author:
-            author = Author(username, author_json.get('name'))
+            name = "Unknown"
+            if author_json:
+                name = author_json.get('name')
+            author = Author(username, name)
             self._authors[username] = author
         return author
+
+
+class GerritQueryCache(object):
+
+    """Manages a cache of results from `gerrit query`."""
+
+    def __init__(self, filename, max_age, batch_size):
+        self._filename = filename
+        self._max_age = max_age
+        self._batch_size = batch_size
+        self._query_results = None
+
+    def get_query_results(self, force_update=False):
+        update = force_update or not self._filename or not os.path.exists(self._filename)
+        if not update:
+            self._read_cache()
+        if update:
+            self._update_cache()
+        return GerritQueryResults(self._query_results)
+
+    def _read_cache(self):
+        with open(self._filename, 'r') as fp:
+            lines = fp.readlines()
+        self._query_results = lines
+
+    def _update_cache(self):
+        query_results = ''
+        start = 0
+        more_results = True
+        while more_results:
+            query = ['ssh', '-p', '29418', 'gerrit.gromacs.org', 'gerrit', 'query',
+                    '--format=JSON', '--all-approvals', '--comments', '-S', str(start),
+                    '--', '-age:{0}d'.format(self._max_age), 'OR', 'status:open',
+                    'limit:{0}'.format(self._batch_size)]
+            results = subprocess.check_output(query)
+            more_results = GerritQueryResults.has_more_results(results)
+            query_results += results
+            start += self._batch_size
+        if self._filename:
+            with open(self._filename, 'w') as fp:
+                fp.write(query_results)
+        self._query_results = query_results.splitlines()

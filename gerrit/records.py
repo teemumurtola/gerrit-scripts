@@ -1,8 +1,6 @@
-# Copyright (c) 2014, Teemu Murtola
+# Copyright (c) 2014,2016, Teemu Murtola
 
 """Classes to represent Gerrit events as a flat list of records."""
-
-import datetime
 
 import gerrit.query
 
@@ -84,9 +82,10 @@ class GerritRecords(object):
     various statistics can be calculated.
     """
 
-    def __init__(self, data, activity_days):
+    def __init__(self, data, start_date, end_date):
         self._data = data
-        self._cutoff_date = datetime.date.today() - datetime.timedelta(days=activity_days)
+        self._start_date = start_date
+        self._end_date = end_date
         self._change_activity = None
         self._comments = None
         self._technical_comments = None
@@ -141,7 +140,7 @@ class GerritRecords(object):
         return self._open_votes
 
     def _to_record_date(self, date):
-        if date and date.date() < self._cutoff_date:
+        if date and (date.date() < self._start_date or date.date() > self._end_date):
             return None
         return date
 
@@ -175,4 +174,3 @@ class GerritRecords(object):
                     record = VoteRecord(change, approval.by, timestamp)
                     result.append(record)
         return result
-

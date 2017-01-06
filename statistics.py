@@ -125,5 +125,3 @@ class Statistics(object):
             for elem, column, width in zip(line, all_columns, widths):
                 fp.write(u'{0:{width}} '.format(column.to_string(elem), width=width));
             fp.write('\n')
-
-

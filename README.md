@@ -9,4 +9,4 @@ Disclaimers:
    (<http://www.gromacs.org>), and may contain some things or defaults that are
    specific to the Gromacs setup, but should be easy enough to generalize if
    necessary.
- * The scripts have been tested against Gerrit Code Review 2.9.1.
+ * The scripts have been tested against Gerrit Code Review 2.9.1 and 2.13.3.
